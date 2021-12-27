@@ -6,6 +6,8 @@ An individual computer with good software is usually either fully functional or 
 ## Problems with Distributed Systems
 Detecting faults is hard (usually uses timeouts by can't distinguish between network and node failures). Tolerate a fault is not easy either (the system shares nothing and relies on messages).
 * problems: 
+
+    Packets can be lost, reordered, duplicated, or arbitrarily delayed in the network; clocks are approximate at best; and nodes can pause (eg. due to garbage collection) or crash at any time.
     1. Unreliable Networks
         * issue: the internet and most internal networks in datacenters (often Ethernet) are asynchronous packet networks with unbounded delays (the network gives no guarantees as to when the packet will arrive, or whether it will arrive at all)
             * request is lost 

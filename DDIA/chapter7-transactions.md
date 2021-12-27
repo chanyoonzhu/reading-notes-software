@@ -22,7 +22,7 @@ In a perfect world, database guarantees **serializable isolation** (transactions
     * lost updates: two concurrent writes to increase a counter will result in one write missing
     * read skew: a write transaction happens and is committed in the middle of a read transaction, causing inconsistency in the values being read. (eg. balance transfer b/t two accounts)
     * write skew:
-        * definition: write skew is a generalization of the lost updatte problem. Writte skew can occur if two transactions read the same objects, and then update some of those objects (may be different objects). In the special case where they update the same object, you get a dirty write or lost update. 
+        * definition: write skew is a generalization of the lost update problem. Write skew can occur if two transactions read the same objects, and then update some of those objects (may be different objects). In the special case where they update the same object, you get a dirty write or lost update. 
         * examples:
             * book meeting room conflicts
             * multiplayer moving two figures to the same position
@@ -89,6 +89,8 @@ In a perfect world, database guarantees **serializable isolation** (transactions
         * materializing conflicts (last resort): when locking object isn't possible (objects doesn't exist), can introduce a new table which keeps track of conflicts and locks. (error-prone). A serializable isolation level is much preferable.
             
 ## Serializable Isolation
+### Definition:
+Even through transactions may execute in parallel, the end result is the same as if they had executed one at a time, serially, without any concurrency.
 ### Why?
 * Stronger isolation guarantee: protects all race conditions 
 * Using weaker isolation levels is error-prone:
@@ -130,7 +132,7 @@ In a perfect world, database guarantees **serializable isolation** (transactions
                 (-) less precise than predicate locks
                 (+) lower overheads (worth trade-off)
 3. Serializable Snapshot Isolation
-* highlight: serailizable isolation with good performance (avoiding unneceessary aborts); used both in single-node and distributed databses; still young compared to other concurrency control mechanisms, has the possibility of being fast enough to become the new default in the future
+* highlight: serailizable isolation with good performance (avoiding unnecessary aborts); used both in single-node and distributed databses; still young compared to other concurrency control mechanisms, has the possibility of being fast enough to become the new default in the future
 * optimistic concurrency control: allows concurrent transactions, check race conditions when transaction is committed and see if it's necessary to abort until then. (2PL locking uses pessimistic concurrency control where it assumes all concurrency transactions would result in race conditions). 
 * how does it detect phantoms (change of read query results from a concurrent write)?
     * detecting stale MVCC reads: the database tracks when a transaction ignores another transaction's writes when they are not committeed. When the transaction wants to commit, the database checks whetheer any of the ignored writes have now been committed. If so, the transaction must be aborted. 
