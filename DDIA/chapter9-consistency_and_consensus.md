@@ -5,10 +5,10 @@ Find some general-purpose abstractions with useful guarantees, implement them on
 ## What are the most important abstractions for distributed systems?
 Concensus (getting all of the nodes to agree on something)
 ## Strong Consistency Guarantee - Linearizability
-* linearizability is the strongest consistency guarantee: a linearizable register (object) behaves as if there's only a subgke ciot if tge data, and every operation appears to take effect atomically at one point in time.
-* a useful guarantee, but few systems are actually linearizable due to its cost on availability and the fact that linearizability is slow. Weaker consistency guarantees (eg. ordering guarantees) is much faster.
+* linearizability is the strongest consistency guarantee: a linearizable register (object) behaves as if there's only a single database, and every operation appears to take effect atomically at one point in time.
+* problem it solves: Eventual consistency is a very weak guarantee (doesn't guarantee when the replicas will converge). Stronger consistency models need to be explored. (pros: easier to use from applications perspective; cons: worse performance, less fault-tolerant)
+* a useful guarantee, but few systems are actually linearizable due to its cost on availability and the fact that linearizability is slow (especially with large network delays). Weaker consistency guarantees (eg. ordering guarantees) is much faster.
 * linearizable: all requests and responses can be arranged into a valid sequantial (total) order (p.328 figure 9-4)
-* Problem: Eventual consistency is a very weak guarantee (doesn't guarantee when the replicas will converge). Stronger consistency models need to be explored. (pros: easier to use from applications perspective; cons: worse performance, less fault-tolerant)
 * linearizability vs. serializability
     
     both mean something like "can be arranged in a sequential order
@@ -43,6 +43,10 @@ Concensus (getting all of the nodes to agree on something)
 * a weaker consistency than linearalizability: linearalizability guarantees total ordering (including events without causal relationships); in many cases, system that appear to require linearizability only really require causal consistency
     * advantage: the strongest possible consistency model that does not slow down due to network delays (like linearalizability does), and remains available in the face of network failures
 * current status: promising direction, not yet made into production
+* pros & cons
+    (+) does not have the coordination overhead of linearizability
+    (+) much less sensitive to network problems
+    (-) some things like unique username assignment cannot be implemented (does not know whether another node is concurrently in the process of registering the same name). (need to achieve **consensus**)
 * capturing causal dependencies:
     * how? - when a replica process an operation, it must ensure that all causally preceding operations have already been processed; if some preceding operation is missing, the later operation must wait until the preceding operation has been processed. It tracks causal dependencies across the entire database (not just for a single key) using version vectors. The version number from the prior operation is passed back to the database on a write in order to determine the causal ordering. (p.189)
     * methods:
@@ -50,8 +54,8 @@ Concensus (getting all of the nodes to agree on something)
             * Lamport timestamps generate sequence numbers across nodes: each node has a unique id, and each node keeps a counter of the number of operations it has processed (counter, node ID). If you have two timestamps, the one with a greater counter value is the greater timestamp; if the counter values are the same, the one with the greater node ID is the greater timestamp. When a node sees a counter vlue greater than its own counter value (contained in a client request/response), it immediately increases its own counter to that maximum
             * disadvantage: not enough for implementing creating unique usernames (the total order of operations only emerges after the operation is completed; we need to know when that order is finalized - need total order broadcast)
         1. total order broadcast
-            * definition: 
-                * reliable delivery: no messages are lost; if a message is deliverd to one node, it iis delivered to all nodes
+            * definition: (delivered exactly once, in the same order)
+                * reliable delivery: no messages are lost; if a message is deliverd to one node, it is delivered to all nodes
                 * totally ordered delivery: messages are delivered to every node in the same order
             * implementation: ZooKeeper
             * used for: 
@@ -71,13 +75,29 @@ Concensus (getting all of the nodes to agree on something)
                     1. send the message to all nodes (resending lost messages), and the recipients will deliver the messages consecutively by sequence number (if a number in the middle is missing, the node will wait)
                 * hard to have a linearizable storage when: network connections to the node keeping the linearizable integer are interrupted; restoring the value when that node fails
 ## Distributed Transactions and Consensus
-* The most important problem in distributed system: get several nodes to agree on something
+* The most important problem in distributed system: get several nodes to agree on something irevocably.
+* definition of concensus problem: one or more nodes may propose values, and the consesus algorithm decides on one of those values. 
+* equivalent problems that can be reduced to concensus problems:
+    1. linearizable comprare-and-set registers: the register(object/variable) needs to atomically decide whether to set its value, based on whether its current value equals the parameter given in the operation
+    1. atomic transaction commit: a database must decide whether to commit or abourt a distributed transaction
+    1. total order broadcast: the messaging system must decide on the order in which to deliver messages
+    1. locks and leases: when several clients are racing to grab a lock or lease, the lock decides which on successfully acquire it
+    1. membership/coordination service: given a failuree detector (eg., timeouts), the system must decidd which nodes are alive, and which should be considered dead because their sessions timed out
+    1. uniqueness constraint: when several transactions concurrently try to create conflicing records with the same key, the constraint must decide which one to allow and which should fail with a constraint violation
+* a consensus algorithm must satisfy the following properties:
+    1. uniform agreement: no two nodes dicide differently
+    1. integrity: no node decides twice
+    1. validity: if a node decides value v, then v was proposed by some node
+    1. termination: every node that does not creash eventually decides some value
+    * pros & cons:
+        (+)a concensus algorithms are a huge break through for distributed systems. They can implement linearizable atomic operations in a fault-tolerant way.
+        (-) most consensus algorithm assume a fixed set of nodes participating in voting; blocked on synchronous replication when voting on proposals; sensitive to network problem (uses timeouts to detect node failure)
 * Use cases:
     * leader election: no split brain
     * atomic commit: a transaction either commit or rolled back on all nodes
 * Algorithms:
     1. two-phase commit (2PC)
-        * most common way of solving atomic commit in a distributed system; implemented in various databases, messaging systems, and application servers. Not a very good concensus algorithm.
+        * most common way of solving atomic commit in a distributed system; implemented in various databases, messaging systems, and application servers. Not a very good concensus algorithm - weak fault-tolerance when coordinator fails.
         * when should a node in a distributed system commit? Only when it's certain that tall other nodes in the transaction are also going to commit
         * implementation: most "NoSQL distributed datastores do not support distributed atomic transactions, but various clustered relational systems do.
         * steps:
@@ -87,10 +107,21 @@ Concensus (getting all of the nodes to agree on something)
         * details: each read/write sent to nodes are tracked with a globally unique transaction id (managed by coordinator) if abort is needed. Once a node answer "yes", it must commit the transaction in phase 2 if the coordinator chooses to do so (even if node crashes, it will commit after it comes back). Once a coordinator decides all nodes should commit, all nodes must commit in spite of request fail or timeout (the coordinator keeps retrying until successful). If the coordinator crashes, the participants can do nothing but wait. The coordinator must write its commit or abort decision to a transaction log on disk before sending out final requests to helper recover from crash.
         * pros & cons:
             (+) result is similar as a regular single-node atomic commit
-            (-) a blocking commit when the coordinator crashes and all nodes waiting for it to recover at phase 2. (performance penalty - database cannot release those locks until the transaction commits or aborts and no other transaction can modify those rows until then; many cloud services choose not to implement distributed transactions due to this reason)
+            (-) does not satisfy the "Termination" properties of a consensus algorhm: a blocking commit when the coordinator crashes and all nodes waiting for it to recover at phase 2. (performance penalty - database cannot release those locks until the transaction commits or aborts and no other transaction can modify those rows until then; many cloud services choose not to implement distributed transactions due to this reason)
             (-) single point of failure if the coordinator runs only on a single node
             (-) coordinator log makes the application not stateless (need to store the transaction log in disk, like a database)
         * a standard for implementation across heterogeneous technologies (participants of 2PC use two or more different technologies) - XA transactions
             * a C API for interfacing with a transaction coordinator.
             * the coordinator in application calls the WA API to find out whether an operation should be part of a distributed transaction, and ask the participants to prepare, commit, or abort
-* Distributed Transactions in Practice
+    * fault-tolerant consensus algorithms
+        * the best known fault-tolerant consensus algorithm are: Viewstamped Replication, Paxos, Raft, and Zab
+        * are in fact total ordering broadcast (which is equivalent to repeated rounds of consensus)
+        * elects a "leader" in each epoch using an incremented epoch number to track votes. The leader if voted from a quorum of nodes
+        * biggest difference from 2PC: cencus is arrived from a majority of nodes (quorum) where as in 2PC, concensus need to be obtained from all nodes
+* ZooKeeper - a service implementing concensus algorithm
+    * what is ZooKeeper used for: users "outsource" some of the work of coordinating nodes to SooKeeper
+    * use cases:
+        1. choose a leader (for databases, job schedulers, etc.)
+        1. deciding which partition to assign to which node
+        1. service discovery (actually not requuires consensus that much, DNS can do the job)
+        1. membership services: determines which nodes are currently active and live members of a cluster
